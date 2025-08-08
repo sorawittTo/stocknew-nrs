@@ -2,12 +2,12 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useStock } from '@/contexts/StockContext';
 import { AlertTriangle, Package, TrendingDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useStock } from '@/contexts/StockContext';
 
 export function StockOverview() {
-  const { products, categories, getStockLevel } = useStock();
+  const { products, getStockLevel } = useStock();
 
   const lowStockProducts = products.filter(p => getStockLevel(p) === 'low');
   const outOfStockProducts = products.filter(p => getStockLevel(p) === 'out');
@@ -48,13 +48,12 @@ export function StockOverview() {
         <CardContent>
           <div className="space-y-3">
             {lowStockProducts.slice(0, 5).map(product => {
-              const category = categories.find(c => c.id === product.category);
               return (
                 <div key={product.id} className="flex items-center justify-between p-3 bg-white/50 backdrop-blur-sm rounded-lg border border-white/30">
                   <div className="space-y-1">
                     <p className="text-sm font-medium">{product.name}</p>
                     <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
-                    <p className="text-xs text-muted-foreground">{category?.name}</p>
+                    <p className="text-xs text-muted-foreground">{product.category_name}</p>
                   </div>
                   <div className="text-right space-y-1">
                     <Badge 
@@ -98,13 +97,12 @@ export function StockOverview() {
         <CardContent>
           <div className="space-y-3">
             {outOfStockProducts.slice(0, 5).map(product => {
-              const category = categories.find(c => c.id === product.category);
               return (
                 <div key={product.id} className="flex items-center justify-between p-3 bg-white/50 backdrop-blur-sm rounded-lg border border-white/30">
                   <div className="space-y-1">
                     <p className="text-sm font-medium">{product.name}</p>
                     <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
-                    <p className="text-xs text-muted-foreground">{category?.name}</p>
+                    <p className="text-xs text-muted-foreground">{product.category_name}</p>
                   </div>
                   <div className="text-right">
                     <Badge variant="destructive">

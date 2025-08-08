@@ -1,5 +1,36 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { Product, StockMovement, Category, Supplier, StockStats, StockFilter } from '@/types/stock';
+import { supabase, type Product as DBProduct, type Category as DBCategory, type Supplier as DBSupplier, type Movement as DBMovement } from '@/lib/supabase';
+import { useToast } from '@/hooks/use-toast';
+
+// Updated types to match database structure
+interface Product extends DBProduct {
+  category_name?: string;
+  supplier_name?: string;
+}
+
+interface StockMovement extends DBMovement {
+  product_name?: string;
+  product_sku?: string;
+}
+
+interface Category extends DBCategory {}
+
+interface Supplier extends DBSupplier {}
+
+interface StockStats {
+  totalProducts: number;
+  totalValue: number;
+  lowStockItems: number;
+  outOfStockItems: number;
+  recentMovements: number;
+}
+
+interface StockFilter {
+  category?: string;
+  supplier?: string;
+  stockLevel?: 'high' | 'medium' | 'low' | 'out';
+  searchTerm?: string;
+}
 
 interface StockState {
   products: Product[];
@@ -12,6 +43,10 @@ interface StockState {
 }
 
 type StockAction =
+  | { type: 'SET_PRODUCTS'; payload: Product[] }
+  | { type: 'SET_MOVEMENTS'; payload: StockMovement[] }
+  | { type: 'SET_CATEGORIES'; payload: Category[] }
+  | { type: 'SET_SUPPLIERS'; payload: Supplier[] }
   | { type: 'ADD_PRODUCT'; payload: Product }
   | { type: 'UPDATE_PRODUCT'; payload: Product }
   | { type: 'DELETE_PRODUCT'; payload: string }
@@ -25,17 +60,8 @@ type StockAction =
 const initialState: StockState = {
   products: [],
   movements: [],
-  categories: [
-    { id: '1', name: 'Electronics', description: 'Electronic devices and accessories', color: '#3B82F6' },
-    { id: '2', name: 'Clothing', description: 'Apparel and fashion items', color: '#10B981' },
-    { id: '3', name: 'Books', description: 'Books and publications', color: '#F59E0B' },
-    { id: '4', name: 'Home & Garden', description: 'Home improvement and garden supplies', color: '#8B5CF6' },
-  ],
-  suppliers: [
-    { id: '1', name: 'TechSupply Co.', contact: 'John Smith', email: 'john@techsupply.com', phone: '+1-555-0123' },
-    { id: '2', name: 'Fashion Forward', contact: 'Sarah Johnson', email: 'sarah@fashionforward.com', phone: '+1-555-0124' },
-    { id: '3', name: 'BookWorld', contact: 'Mike Wilson', email: 'mike@bookworld.com', phone: '+1-555-0125' },
-  ],
+  categories: [],
+  suppliers: [],
   stats: {
     totalProducts: 0,
     totalValue: 0,
@@ -44,84 +70,16 @@ const initialState: StockState = {
     recentMovements: 0,
   },
   filter: {},
-  loading: false,
+  loading: true,
 };
-
-// Sample data
-const sampleProducts: Product[] = [
-  {
-    id: '1',
-    name: 'MacBook Pro 16"',
-    sku: 'MBP-16-001',
-    description: 'Apple MacBook Pro 16-inch with M3 chip',
-    category: '1',
-    supplier: '1',
-    currentStock: 15,
-    minStock: 5,
-    maxStock: 50,
-    unitPrice: 2499.99,
-    barcode: '123456789012',
-    location: 'A1-B2',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    name: 'Wireless Headphones',
-    sku: 'WH-001',
-    description: 'Premium noise-canceling wireless headphones',
-    category: '1',
-    supplier: '1',
-    currentStock: 3,
-    minStock: 10,
-    maxStock: 100,
-    unitPrice: 299.99,
-    barcode: '123456789013',
-    location: 'A2-C1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    name: 'Designer T-Shirt',
-    sku: 'TS-001',
-    description: 'Premium cotton designer t-shirt',
-    category: '2',
-    supplier: '2',
-    currentStock: 0,
-    minStock: 20,
-    maxStock: 200,
-    unitPrice: 49.99,
-    barcode: '123456789014',
-    location: 'B1-A3',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: '4',
-    name: 'JavaScript Guide',
-    sku: 'JS-GUIDE-001',
-    description: 'Complete guide to modern JavaScript development',
-    category: '3',
-    supplier: '3',
-    currentStock: 45,
-    minStock: 10,
-    maxStock: 100,
-    unitPrice: 39.99,
-    barcode: '123456789015',
-    location: 'C1-A1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
 
 function calculateStats(products: Product[], movements: StockMovement[]): StockStats {
   const totalProducts = products.length;
-  const totalValue = products.reduce((sum, product) => sum + (product.currentStock * product.unitPrice), 0);
-  const lowStockItems = products.filter(p => p.currentStock <= p.minStock && p.currentStock > 0).length;
-  const outOfStockItems = products.filter(p => p.currentStock === 0).length;
+  const totalValue = products.reduce((sum, product) => sum + (product.current_stock * product.unit_price), 0);
+  const lowStockItems = products.filter(p => p.current_stock <= p.min_stock && p.current_stock > 0).length;
+  const outOfStockItems = products.filter(p => p.current_stock === 0).length;
   const recentMovements = movements.filter(m => {
-    const movementDate = new Date(m.createdAt);
+    const movementDate = new Date(m.created_at);
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     return movementDate >= oneWeekAgo;
@@ -138,6 +96,26 @@ function calculateStats(products: Product[], movements: StockMovement[]): StockS
 
 function stockReducer(state: StockState, action: StockAction): StockState {
   switch (action.type) {
+    case 'SET_PRODUCTS':
+      return {
+        ...state,
+        products: action.payload,
+      };
+    case 'SET_MOVEMENTS':
+      return {
+        ...state,
+        movements: action.payload,
+      };
+    case 'SET_CATEGORIES':
+      return {
+        ...state,
+        categories: action.payload,
+      };
+    case 'SET_SUPPLIERS':
+      return {
+        ...state,
+        suppliers: action.payload,
+      };
     case 'ADD_PRODUCT':
       return {
         ...state,
@@ -154,26 +132,8 @@ function stockReducer(state: StockState, action: StockAction): StockState {
         products: state.products.filter(p => p.id !== action.payload),
       };
     case 'ADD_MOVEMENT':
-      const updatedProducts = state.products.map(product => {
-        if (product.id === action.payload.productId) {
-          const newStock = action.payload.type === 'IN' 
-            ? product.currentStock + action.payload.quantity
-            : action.payload.type === 'OUT'
-            ? Math.max(0, product.currentStock - action.payload.quantity)
-            : action.payload.quantity;
-          
-          return {
-            ...product,
-            currentStock: newStock,
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return product;
-      });
-      
       return {
         ...state,
-        products: updatedProducts,
         movements: [action.payload, ...state.movements],
       };
     case 'ADD_CATEGORY':
@@ -207,70 +167,248 @@ function stockReducer(state: StockState, action: StockAction): StockState {
 }
 
 interface StockContextValue extends StockState {
-  addProduct: (product: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateProduct: (product: Product) => void;
-  deleteProduct: (id: string) => void;
-  addStockMovement: (movement: Omit<StockMovement, 'id' | 'createdAt'>) => void;
-  addCategory: (category: Omit<Category, 'id'>) => void;
-  addSupplier: (supplier: Omit<Supplier, 'id'>) => void;
+  addProduct: (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => Promise<void>;
+  updateProduct: (product: Product) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+  addStockMovement: (movement: Omit<StockMovement, 'id' | 'created_at'>) => Promise<void>;
+  addCategory: (category: Omit<Category, 'id' | 'created_at'>) => Promise<void>;
+  addSupplier: (supplier: Omit<Supplier, 'id' | 'created_at'>) => Promise<void>;
   setFilter: (filter: StockFilter) => void;
   getFilteredProducts: () => Product[];
   getStockLevel: (product: Product) => 'high' | 'medium' | 'low' | 'out';
+  refreshData: () => Promise<void>;
 }
 
 const StockContext = createContext<StockContextValue | undefined>(undefined);
 
 export function StockProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(stockReducer, {
-    ...initialState,
-    products: sampleProducts,
-  });
+  const [state, dispatch] = useReducer(stockReducer, initialState);
+  const { toast } = useToast();
 
+  // Fetch all data from database
+  const fetchAllData = async () => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    
+    try {
+      // Fetch products with category and supplier names
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select(`
+          *,
+          categories!inner (name),
+          suppliers!inner (name)
+        `)
+        .order('name');
+
+      if (productsError) throw productsError;
+
+      const products = productsData?.map(product => ({
+        ...product,
+        category_name: product.categories.name,
+        supplier_name: product.suppliers.name
+      })) || [];
+
+      // Fetch movements with product details
+      const { data: movementsData, error: movementsError } = await supabase
+        .from('movements')
+        .select(`
+          *,
+          products!inner (name, sku)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (movementsError) throw movementsError;
+
+      const movements = movementsData?.map(movement => ({
+        ...movement,
+        product_name: movement.products.name,
+        product_sku: movement.products.sku
+      })) || [];
+
+      // Fetch categories
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name');
+
+      if (categoriesError) throw categoriesError;
+
+      // Fetch suppliers
+      const { data: suppliersData, error: suppliersError } = await supabase
+        .from('suppliers')
+        .select('*')
+        .order('name');
+
+      if (suppliersError) throw suppliersError;
+
+      // Update state
+      dispatch({ type: 'SET_PRODUCTS', payload: products });
+      dispatch({ type: 'SET_MOVEMENTS', payload: movements });
+      dispatch({ type: 'SET_CATEGORIES', payload: categoriesData || [] });
+      dispatch({ type: 'SET_SUPPLIERS', payload: suppliersData || [] });
+      dispatch({ type: 'CALCULATE_STATS' });
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถดึงข้อมูลจากฐานข้อมูลได้",
+        variant: "destructive",
+      });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  // Initialize data on mount
+  useEffect(() => {
+    fetchAllData();
+  }, []);
+
+  // Recalculate stats when products or movements change
   useEffect(() => {
     dispatch({ type: 'CALCULATE_STATS' });
   }, [state.products, state.movements]);
 
-  const addProduct = (productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const product: Product = {
-      ...productData,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    dispatch({ type: 'ADD_PRODUCT', payload: product });
+  const addProduct = async (productData: Omit<Product, 'id' | 'created_at' | 'updated_at'>) => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .insert([productData])
+        .select(`
+          *,
+          categories!inner (name),
+          suppliers!inner (name)
+        `)
+        .single();
+
+      if (error) throw error;
+
+      const product = {
+        ...data,
+        category_name: data.categories.name,
+        supplier_name: data.suppliers.name
+      };
+
+      dispatch({ type: 'ADD_PRODUCT', payload: product });
+    } catch (error) {
+      console.error('Error adding product:', error);
+      throw error;
+    }
   };
 
-  const updateProduct = (product: Product) => {
-    dispatch({ type: 'UPDATE_PRODUCT', payload: { ...product, updatedAt: new Date().toISOString() } });
+  const updateProduct = async (product: Product) => {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({
+          name: product.name,
+          sku: product.sku,
+          description: product.description,
+          category_id: product.category_id,
+          supplier_id: product.supplier_id,
+          unit_price: product.unit_price,
+          current_stock: product.current_stock,
+          min_stock: product.min_stock,
+          max_stock: product.max_stock,
+          location: product.location,
+          barcode: product.barcode,
+          expiry_date: product.expiry_date
+        })
+        .eq('id', product.id);
+
+      if (error) throw error;
+
+      dispatch({ type: 'UPDATE_PRODUCT', payload: product });
+    } catch (error) {
+      console.error('Error updating product:', error);
+      throw error;
+    }
   };
 
-  const deleteProduct = (id: string) => {
-    dispatch({ type: 'DELETE_PRODUCT', payload: id });
+  const deleteProduct = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      dispatch({ type: 'DELETE_PRODUCT', payload: id });
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      throw error;
+    }
   };
 
-  const addStockMovement = (movementData: Omit<StockMovement, 'id' | 'createdAt'>) => {
-    const movement: StockMovement = {
-      ...movementData,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    };
-    dispatch({ type: 'ADD_MOVEMENT', payload: movement });
+  const addStockMovement = async (movementData: Omit<StockMovement, 'id' | 'created_at'>) => {
+    try {
+      const { data, error } = await supabase
+        .from('movements')
+        .insert([{
+          product_id: movementData.product_id,
+          type: movementData.type,
+          quantity: movementData.quantity,
+          reason: movementData.reason,
+          reference: movementData.reference,
+          notes: movementData.notes,
+          created_by: movementData.created_by
+        }])
+        .select(`
+          *,
+          products!inner (name, sku)
+        `)
+        .single();
+
+      if (error) throw error;
+
+      const movement = {
+        ...data,
+        product_name: data.products.name,
+        product_sku: data.products.sku
+      };
+
+      dispatch({ type: 'ADD_MOVEMENT', payload: movement });
+    } catch (error) {
+      console.error('Error adding movement:', error);
+      throw error;
+    }
   };
 
-  const addCategory = (categoryData: Omit<Category, 'id'>) => {
-    const category: Category = {
-      ...categoryData,
-      id: Date.now().toString(),
-    };
-    dispatch({ type: 'ADD_CATEGORY', payload: category });
+  const addCategory = async (categoryData: Omit<Category, 'id' | 'created_at'>) => {
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .insert([categoryData])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      dispatch({ type: 'ADD_CATEGORY', payload: data });
+    } catch (error) {
+      console.error('Error adding category:', error);
+      throw error;
+    }
   };
 
-  const addSupplier = (supplierData: Omit<Supplier, 'id'>) => {
-    const supplier: Supplier = {
-      ...supplierData,
-      id: Date.now().toString(),
-    };
-    dispatch({ type: 'ADD_SUPPLIER', payload: supplier });
+  const addSupplier = async (supplierData: Omit<Supplier, 'id' | 'created_at'>) => {
+    try {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .insert([supplierData])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      dispatch({ type: 'ADD_SUPPLIER', payload: data });
+    } catch (error) {
+      console.error('Error adding supplier:', error);
+      throw error;
+    }
   };
 
   const setFilter = (filter: StockFilter) => {
@@ -278,9 +416,9 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
   };
 
   const getStockLevel = (product: Product): 'high' | 'medium' | 'low' | 'out' => {
-    if (product.currentStock === 0) return 'out';
-    if (product.currentStock <= product.minStock) return 'low';
-    if (product.currentStock <= product.minStock * 2) return 'medium';
+    if (product.current_stock === 0) return 'out';
+    if (product.current_stock <= product.min_stock) return 'low';
+    if (product.current_stock <= product.min_stock * 2) return 'medium';
     return 'high';
   };
 
@@ -297,11 +435,11 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (state.filter.category) {
-      filtered = filtered.filter(product => product.category === state.filter.category);
+      filtered = filtered.filter(product => product.category_id === state.filter.category);
     }
 
     if (state.filter.supplier) {
-      filtered = filtered.filter(product => product.supplier === state.filter.supplier);
+      filtered = filtered.filter(product => product.supplier_id === state.filter.supplier);
     }
 
     if (state.filter.stockLevel) {
@@ -309,6 +447,10 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
     }
 
     return filtered;
+  };
+
+  const refreshData = async () => {
+    await fetchAllData();
   };
 
   return (
@@ -324,6 +466,7 @@ export function StockProvider({ children }: { children: React.ReactNode }) {
         setFilter,
         getFilteredProducts,
         getStockLevel,
+        refreshData,
       }}
     >
       {children}

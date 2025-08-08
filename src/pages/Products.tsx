@@ -164,10 +164,7 @@ export default function Products() {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('th-TH', {
-      style: 'currency',
-      currency: 'THB',
-    }).format(value);
+    return `฿${value.toLocaleString('th-TH')}`;
   };
 
   const filteredProducts = getFilteredProducts();

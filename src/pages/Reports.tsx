@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Layout } from '@/components/Layout/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,32 +8,36 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useStock } from '@/contexts/StockContext';
 
 export default function Reports() {
-  const { products, categories } = useStock();
+  const { products, categories, movements } = useStock();
   const [reportType, setReportType] = useState('inventory');
   const [timeRange, setTimeRange] = useState('7days');
 
   // Generate sample data for charts
   const inventoryData = categories.map(category => ({
     name: category.name,
-    value: products.filter(p => p.category === category.name).reduce((sum, p) => sum + p.currentStock, 0)
+    value: products.filter(p => p.category_id === category.id).reduce((sum, p) => sum + p.current_stock, 0)
   }));
 
-  const salesData = [
-    { name: 'Mon', sales: 120, purchases: 80 },
-    { name: 'Tue', sales: 190, purchases: 95 },
-    { name: 'Wed', sales: 150, purchases: 70 },
-    { name: 'Thu', sales: 220, purchases: 110 },
-    { name: 'Fri', sales: 280, purchases: 140 },
-    { name: 'Sat', sales: 320, purchases: 160 },
-    { name: 'Sun', sales: 250, purchases: 125 }
-  ];
+  // Generate movement data from actual movements
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    return date;
+  }).reverse();
 
-  const stockMovementData = [
-    { name: 'Week 1', stockIn: 400, stockOut: 240 },
-    { name: 'Week 2', stockIn: 300, stockOut: 139 },
-    { name: 'Week 3', stockIn: 200, stockOut: 980 },
-    { name: 'Week 4', stockIn: 278, stockOut: 390 }
-  ];
+  const salesData = last7Days.map(date => {
+    const dayMovements = movements.filter(m => 
+      new Date(m.created_at).toDateString() === date.toDateString()
+    );
+    
+    return {
+      name: date.toLocaleDateString('th-TH', { weekday: 'short' }),
+      stockIn: dayMovements.filter(m => m.type === 'in').reduce((sum, m) => sum + m.quantity, 0),
+      stockOut: dayMovements.filter(m => m.type === 'out').reduce((sum, m) => sum + m.quantity, 0)
+    };
+  });
+
+  const stockMovementData = salesData;
 
   const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#8dd1e1'];
 
@@ -109,7 +112,7 @@ export default function Reports() {
                 <div>
                   <p className="text-xs sm:text-sm text-muted-foreground">มูลค่าสต็อกรวม</p>
                   <p className="text-lg sm:text-2xl font-bold text-foreground">
-                    ฿{products.reduce((sum, p) => sum + (p.unitPrice * p.currentStock), 0).toLocaleString()}
+                    ฿{products.reduce((sum, p) => sum + (p.unit_price * p.current_stock), 0).toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -125,7 +128,7 @@ export default function Reports() {
                 <div>
                   <p className="text-xs sm:text-sm text-muted-foreground">สินค้าสต็อกต่ำ</p>
                   <p className="text-xl sm:text-2xl font-bold text-foreground">
-                    {products.filter(p => p.currentStock <= p.minStock).length.toLocaleString()}
+                    {products.filter(p => p.current_stock <= p.min_stock).length.toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -214,8 +217,8 @@ export default function Reports() {
                       <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                       <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Line type="monotone" dataKey="sales" stroke="#8884d8" strokeWidth={2} />
-                      <Line type="monotone" dataKey="purchases" stroke="#82ca9d" strokeWidth={2} />
+                      <Line type="monotone" dataKey="stockIn" stroke="#82ca9d" strokeWidth={2} name="รับเข้า" />
+                      <Line type="monotone" dataKey="stockOut" stroke="#ff7300" strokeWidth={2} name="เบิกออก" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

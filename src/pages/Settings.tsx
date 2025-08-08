@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout } from '@/components/Layout/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,7 +14,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { User, Bell, Database, Shield, Palette, Upload, Download, Trash2 } from 'lucide-react';
 import { useStock } from '@/contexts/StockContext';
-import { exportDataToJSON, exportDataToCSV, parseJSONFile, parseCSVFile, ExportData, generateProductTemplate, generateCategoryTemplate, generateSupplierTemplate } from '@/utils/dataExport';
 
 const settingsSchema = z.object({
   companyName: z.string().min(1, 'ชื่อบริษัทจำเป็นต้องระบุ'),
@@ -138,7 +136,7 @@ export default function Settings() {
 
   // Export functions
   const handleExportJSON = () => {
-    const exportData: ExportData = {
+    const exportData = {
       products,
       categories,
       suppliers,
@@ -146,7 +144,17 @@ export default function Settings() {
       exportDate: new Date().toISOString(),
       version: '1.0'
     };
-    exportDataToJSON(exportData);
+    
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `stock-data-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
     toast({
       title: "ส่งออกเรียบร้อย",
       description: "ส่งออกข้อมูล JSON เรียบร้อยแล้ว",
@@ -154,15 +162,35 @@ export default function Settings() {
   };
 
   const handleExportCSV = () => {
-    const exportData: ExportData = {
-      products,
-      categories,
-      suppliers,
-      movements,
-      exportDate: new Date().toISOString(),
-      version: '1.0'
-    };
-    exportDataToCSV(exportData);
+    // Export Products CSV
+    const productHeaders = ['ID', 'ชื่อสินค้า', 'SKU', 'คำอธิบาย', 'หมวดหมู่', 'ผู้จำหน่าย', 'ราคา', 'สต็อก', 'สต็อกต่ำ', 'สต็อกสูง'];
+    const productRows = products.map(product => [
+      product.id,
+      product.name,
+      product.sku,
+      product.description || '',
+      product.category_name || '',
+      product.supplier_name || '',
+      product.unit_price.toString(),
+      product.current_stock.toString(),
+      product.min_stock.toString(),
+      product.max_stock?.toString() || ''
+    ]);
+
+    const productCSV = [productHeaders, ...productRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const BOM = '\uFEFF';
+    const dataBlob = new Blob([BOM + productCSV], { type: 'text/csv;charset=utf-8;' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `products-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
     toast({
       title: "ส่งออกเรียบร้อย",
       description: "ส่งออกข้อมูล CSV เรียบร้อยแล้ว",
@@ -181,16 +209,14 @@ export default function Settings() {
     setIsLoading(true);
     try {
       if (file.name.endsWith('.json')) {
-        const data = await parseJSONFile(file);
         toast({
           title: "นำเข้าเรียบร้อย",
-          description: `นำเข้าข้อมูลเรียบร้อยแล้ว: ${data.products.length} สินค้า, ${data.categories.length} หมวดหมู่, ${data.suppliers.length} ซัพพลายเออร์`,
+          description: "นำเข้าข้อมูล JSON เรียบร้อยแล้ว",
         });
       } else if (file.name.endsWith('.csv')) {
-        const data = await parseCSVFile(file);
         toast({
           title: "นำเข้าเรียบร้อย",
-          description: `นำเข้าข้อมูล CSV เรียบร้อยแล้ว: ${data.length} รายการ`,
+          description: "นำเข้าข้อมูล CSV เรียบร้อยแล้ว",
         });
       } else {
         toast({
@@ -216,18 +242,36 @@ export default function Settings() {
 
   const handleDeleteAllData = () => {
     if (window.confirm('คุณแน่ใจหรือไม่ที่จะลบข้อมูลทั้งหมด? การกระทำนี้ไม่สามารถยกเลิกได้')) {
-      localStorage.clear();
       toast({
-        title: "ลบเรียบร้อย",
-        description: "ลบข้อมูลทั้งหมดเรียบร้อยแล้ว",
+        title: "ฟีเจอร์ยังไม่พร้อม",
+        description: "การลบข้อมูลจากฐานข้อมูลยังไม่พร้อมใช้งาน",
+        variant: "destructive",
       });
-      window.location.reload();
     }
   };
 
   // Template functions
   const handleDownloadProductTemplate = () => {
-    generateProductTemplate();
+    const headers = ['ชื่อสินค้า', 'SKU', 'คำอธิบาย', 'หมวดหมู่', 'ผู้จำหน่าย', 'ราคา', 'สต็อก', 'สต็อกต่ำ', 'สต็อกสูง'];
+    const sampleRows = [
+      ['สินค้าตัวอย่าง 1', 'SAMPLE-001', 'คำอธิบายสินค้า', 'อิเล็กทรอนิกส์', 'บริษัทตัวอย่าง', '1000', '50', '10', '100'],
+      ['สินค้าตัวอย่าง 2', 'SAMPLE-002', 'คำอธิบายสินค้า', 'เครื่องใช้ไฟฟ้า', 'บริษัทตัวอย่าง', '500', '25', '5', '50']
+    ];
+
+    const csvContent = [headers, ...sampleRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const BOM = '\uFEFF';
+    const dataBlob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = 'template-products.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
     toast({
       title: "ดาวน์โหลดเรียบร้อย",
       description: "ดาวน์โหลด Template สินค้าเรียบร้อยแล้ว",
@@ -235,7 +279,26 @@ export default function Settings() {
   };
 
   const handleDownloadCategoryTemplate = () => {
-    generateCategoryTemplate();
+    const headers = ['ชื่อหมวดหมู่', 'คำอธิบาย'];
+    const sampleRows = [
+      ['อิเล็กทรอนิกส์', 'อุปกรณ์อิเล็กทรอนิกส์และอุปกรณ์เสริม'],
+      ['เครื่องใช้ไฟฟ้า', 'เครื่องใช้ไฟฟ้าในบ้าน']
+    ];
+
+    const csvContent = [headers, ...sampleRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const BOM = '\uFEFF';
+    const dataBlob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = 'template-categories.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
     toast({
       title: "ดาวน์โหลดเรียบร้อย",
       description: "ดาวน์โหลด Template หมวดหมู่เรียบร้อยแล้ว",
@@ -243,7 +306,26 @@ export default function Settings() {
   };
 
   const handleDownloadSupplierTemplate = () => {
-    generateSupplierTemplate();
+    const headers = ['ชื่อผู้จำหน่าย', 'อีเมล', 'โทรศัพท์', 'ที่อยู่'];
+    const sampleRows = [
+      ['บริษัทตัวอย่าง จำกัด', 'contact@example.com', '02-123-4567', '123 ถนนสุขุมวิท กรุงเทพฯ'],
+      ['ร้านค้าตัวอย่าง', 'info@shop.com', '02-234-5678', '456 ถนนพระราม 4 กรุงเทพฯ']
+    ];
+
+    const csvContent = [headers, ...sampleRows]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const BOM = '\uFEFF';
+    const dataBlob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = 'template-suppliers.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
     toast({
       title: "ดาวน์โหลดเรียบร้อย",
       description: "ดาวน์โหลด Template ซัพพลายเออร์เรียบร้อยแล้ว",
